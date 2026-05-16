@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { TransactionsService } from './transactions.service';
 import { CreateInflowDto } from './dto/inflow.dto';
 import { CreateOutflowDto } from './dto/outflow.dto';

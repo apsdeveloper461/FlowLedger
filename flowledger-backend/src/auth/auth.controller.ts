@@ -7,8 +7,9 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { Response, Request } from 'express';
+import type { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -108,12 +109,22 @@ export class AuthController {
   ) {
     const refreshToken =
       (req.cookies as Record<string, string>)?.refresh_token ?? '';
-    const payload = this.authService['jwtService'].verify<{ sub: string }>(
-      refreshToken,
-      {
-        secret: this.authService['configService'].get<string>('jwt.refreshSecret'),
-      },
-    );
+      
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is missing.');
+    }
+
+    let payload: { sub: string };
+    try {
+      payload = this.authService['jwtService'].verify<{ sub: string }>(
+        refreshToken,
+        {
+          secret: this.authService['configService'].get<string>('jwt.refreshSecret'),
+        },
+      );
+    } catch (err) {
+      throw new UnauthorizedException('Invalid or expired refresh token.');
+    }
 
     const tokens = await this.authService.refreshTokens(payload.sub, refreshToken);
     this.setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
