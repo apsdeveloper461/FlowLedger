@@ -1,15 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Download, Search } from 'lucide-react';
-import { useTransactions } from '../../../../hooks/useTransactions';
-import { useWallets } from '../../../../hooks/useWallets';
-import { LedgerQuery, Transaction } from '../../../../types/transaction.types';
-import { Wallet } from '../../../../types/wallet.types';
-import { TypeBadge } from '../../../../components/TypeBadge';
-import { AmountBadge } from '../../../../components/AmountBadge';
-import { TransactionTypeKey } from '../../../../constants/transactionTypes';
-import { formatDate } from '../../../../lib/dates';
+import { useEffect, useState, type ComponentType } from 'react';
+import { Plus, Download, Search } from 'lucide-react';
 import { Button } from '@workspace/ui/components/button';
 import { Input } from '@workspace/ui/components/input';
 import {
@@ -29,20 +21,99 @@ import {
   TableRow,
 } from '@workspace/ui/components/table';
 import { Skeleton } from '@workspace/ui/components/skeleton';
+import { useTransactions } from '../../hooks/useTransactions';
+import { useWallets } from '../../hooks/useWallets';
+import { useDashboardStats } from '../../app/(dashboard)/flowboard/_hooks/useAnalytics';
+import { LedgerQuery, Transaction } from '../../types/transaction.types';
+import { TransactionTypeKey } from '../../constants/transactionTypes';
+import { Wallet } from '../../types/wallet.types';
+import { TypeBadge } from '../TypeBadge';
+import { AmountBadge } from '../AmountBadge';
+import { StatCard } from '../StatCard';
+import { AnimatedPage, AnimatedStagger, AnimatedItem } from '../animated-page';
+import { formatDate } from '../../lib/dates';
+import type { LucideIcon } from 'lucide-react';
 
 const PAGE_LIMIT = 20;
 
-export default function LedgerClient() {
-  const { ledger, loading, fetchLedger, exportCsv } = useTransactions();
-  const { activeWallets } = useWallets();
+type FormDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: () => void;
+};
 
+export interface TransactionPageConfig {
+  title: string;
+  description: string;
+  defaultType?: TransactionTypeKey;
+  typeFilterOptions?: { value: string; label: string }[];
+  addButtonLabel: string;
+  FormDialog: ComponentType<FormDialogProps>;
+  stats: {
+    id: string;
+    label: string;
+    getValue: (ctx: StatsContext) => number | string;
+    icon: LucideIcon;
+    colorClass?: string;
+    format?: 'currency' | 'number' | 'raw';
+  }[];
+}
+
+interface StatsContext {
+  dashboardTotal?: number;
+  ledgerTotal: number;
+  pageSum: number;
+}
+
+function getAmountType(type: TransactionTypeKey): 'inflow' | 'outflow' | 'neutral' {
+  if (type === 'inflow' || type === 'transfer_in') return 'inflow';
+  if (type === 'outflow' || type === 'transfer_out' || type === 'transfer_fee') return 'outflow';
+  return 'neutral';
+}
+
+function firstDayOfMonth(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+export function TransactionPage({
+  title,
+  description,
+  defaultType,
+  typeFilterOptions,
+  addButtonLabel,
+  FormDialog,
+  stats,
+}: TransactionPageConfig) {
+  const { ledger, loading, fetchLedger, exportCsv } = useTransactions();
+  const { activeWallets, fetch: fetchWallets } = useWallets();
+  const { loading: statsLoading, fetch: fetchStats } = useDashboardStats({
+    dateFrom: firstDayOfMonth(),
+  });
+  const { stats: allTimeStats, fetch: fetchAllStats } = useDashboardStats();
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>(defaultType ?? '');
   const [query, setQuery] = useState<LedgerQuery>({
     page: 1,
     limit: PAGE_LIMIT,
     sortBy: 'date',
     sortOrder: 'DESC',
+    type: defaultType,
   });
-  const [search, setSearch] = useState('');
+
+  const refresh = () => {
+    void fetchLedger(query);
+    void fetchStats();
+    void fetchAllStats();
+  };
+
+  useEffect(() => {
+    void fetchWallets();
+    void fetchAllStats();
+    void fetchStats();
+  }, []);
 
   useEffect(() => {
     void fetchLedger(query);
@@ -50,24 +121,65 @@ export default function LedgerClient() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setQuery((q: LedgerQuery) => ({ ...q, search, page: 1 }));
+    setQuery((q) => ({ ...q, search, page: 1 }));
+  };
+
+  const handleSuccess = () => {
+    setDialogOpen(false);
+    refresh();
+  };
+
+  const pageSum =
+    ledger?.data.reduce((sum, tx) => sum + Number(tx.amount), 0) ?? 0;
+
+  const statsCtx: StatsContext = {
+    dashboardTotal: allTimeStats
+      ? defaultType === 'inflow'
+        ? allTimeStats.totalInflow
+        : defaultType === 'outflow'
+          ? allTimeStats.totalOutflow
+          : allTimeStats.totalFees
+      : 0,
+    ledgerTotal: ledger?.total ?? 0,
+    pageSum,
   };
 
   const totalPages = ledger ? Math.ceil(ledger.total / PAGE_LIMIT) : 0;
   const currentPage = query.page ?? 1;
 
-  const getAmountType = (type: TransactionTypeKey): 'inflow' | 'outflow' | 'neutral' => {
-    if (type === 'inflow' || type === 'transfer_in') return 'inflow';
-    if (type === 'outflow' || type === 'transfer_out' || type === 'transfer_fee') return 'outflow';
-    return 'neutral';
-  };
-
   return (
-    <div className="space-y-4">
+    <AnimatedPage className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+        <Button onClick={() => setDialogOpen(true)} className="shrink-0 gap-2">
+          <Plus className="size-4" />
+          {addButtonLabel}
+        </Button>
+      </div>
+
+      <AnimatedStagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {stats.map((s) => (
+          <AnimatedItem key={s.id}>
+            <StatCard
+              id={s.id}
+              label={s.label}
+              value={s.getValue(statsCtx)}
+              icon={s.icon}
+              colorClass={s.colorClass}
+              format={s.format}
+              loading={statsLoading && s.format === 'currency'}
+            />
+          </AnimatedItem>
+        ))}
+      </AnimatedStagger>
+
       <Card>
         <CardHeader className="pb-4">
           <CardTitle className="text-base">Filters</CardTitle>
-          <CardDescription>Search and filter your transactions</CardDescription>
+          <CardDescription>Refine the transaction list below</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
@@ -75,51 +187,48 @@ export default function LedgerClient() {
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="ledger-search"
+                  id="tx-search"
                   placeholder="Search notes…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="ps-9"
                 />
               </div>
-              <Button type="submit" variant="secondary" size="sm" id="ledger-search-btn">
+              <Button type="submit" variant="secondary" size="sm">
                 Search
               </Button>
             </form>
 
-            <Select
-              onValueChange={(v) =>
-                setQuery((q: LedgerQuery) => ({
-                  ...q,
-                  type: v === 'all' ? undefined : (v as TransactionTypeKey),
-                  page: 1,
-                }))
-              }
-            >
-              <SelectTrigger className="w-full sm:w-[160px]" id="ledger-type-filter">
-                <SelectValue placeholder="All types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="inflow">Inflow</SelectItem>
-                <SelectItem value="outflow">Outflow</SelectItem>
-                <SelectItem value="transfer_out">Transfer Out</SelectItem>
-                <SelectItem value="transfer_in">Transfer In</SelectItem>
-                <SelectItem value="transfer_fee">Transfer Fee</SelectItem>
-              </SelectContent>
-            </Select>
+            {typeFilterOptions && (
+              <Select
+                value={typeFilter || 'all'}
+                onValueChange={(v) => {
+                  const type = v === 'all' ? undefined : (v as TransactionTypeKey);
+                  setTypeFilter(v === 'all' ? '' : v);
+                  setQuery((q) => ({ ...q, type, page: 1 }));
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  {typeFilterOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             <Select
               onValueChange={(v) =>
-                setQuery((q: LedgerQuery) => ({
-                  ...q,
-                  walletId: v === 'all' ? undefined : v,
-                  page: 1,
-                }))
+                setQuery((q) => ({ ...q, walletId: v === 'all' ? undefined : v, page: 1 }))
               }
             >
-              <SelectTrigger className="w-full sm:w-[160px]" id="ledger-wallet-filter">
-                <SelectValue placeholder="All wallets" />
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Wallet" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All wallets</SelectItem>
@@ -135,10 +244,10 @@ export default function LedgerClient() {
               defaultValue="date-DESC"
               onValueChange={(v) => {
                 const [sortBy, sortOrder] = v.split('-') as ['date' | 'amount', 'ASC' | 'DESC'];
-                setQuery((q: LedgerQuery) => ({ ...q, sortBy, sortOrder, page: 1 }));
+                setQuery((q) => ({ ...q, sortBy, sortOrder, page: 1 }));
               }}
             >
-              <SelectTrigger className="w-full sm:w-[160px]" id="ledger-sort">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Sort" />
               </SelectTrigger>
               <SelectContent>
@@ -149,15 +258,9 @@ export default function LedgerClient() {
               </SelectContent>
             </Select>
 
-            <Button
-              variant="outline"
-              size="sm"
-              id="ledger-export"
-              className="gap-2"
-              onClick={() => void exportCsv(query)}
-            >
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => void exportCsv(query)}>
               <Download className="size-4" />
-              Export
+              Export CSV
             </Button>
           </div>
         </CardContent>
@@ -172,7 +275,7 @@ export default function LedgerClient() {
                 <TableHead>Type</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead className="hidden sm:table-cell">Wallet</TableHead>
-                <TableHead className="hidden md:table-cell">Spend Tag</TableHead>
+                <TableHead className="hidden md:table-cell">Tag</TableHead>
                 <TableHead className="hidden lg:table-cell">Note</TableHead>
               </TableRow>
             </TableHeader>
@@ -240,8 +343,7 @@ export default function LedgerClient() {
                 size="sm"
                 variant="outline"
                 disabled={currentPage <= 1}
-                onClick={() => setQuery((q: LedgerQuery) => ({ ...q, page: (q.page ?? 1) - 1 }))}
-                id="ledger-prev"
+                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) - 1 }))}
               >
                 Previous
               </Button>
@@ -249,8 +351,7 @@ export default function LedgerClient() {
                 size="sm"
                 variant="outline"
                 disabled={currentPage >= totalPages}
-                onClick={() => setQuery((q: LedgerQuery) => ({ ...q, page: (q.page ?? 1) + 1 }))}
-                id="ledger-next"
+                onClick={() => setQuery((q) => ({ ...q, page: (q.page ?? 1) + 1 }))}
               >
                 Next
               </Button>
@@ -258,6 +359,8 @@ export default function LedgerClient() {
           </div>
         )}
       </Card>
-    </div>
+
+      <FormDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={handleSuccess} />
+    </AnimatedPage>
   );
 }

@@ -1,17 +1,42 @@
-import type { Metadata } from 'next';
-import { PageHeader } from '../../../components/PageHeader';
-import InflowForm from './_components/InflowForm';
+'use client';
 
-export const metadata: Metadata = { title: 'Add Inflow — FlowLedger' };
+import { ArrowDownLeft, Hash, TrendingUp } from 'lucide-react';
+import { TransactionPage } from '../../../components/transactions/TransactionPage';
+import { InflowDialog } from '../../../components/transactions/InflowDialog';
 
 export default function InflowPage() {
   return (
-    <div className="space-y-6 max-w-xl">
-      <PageHeader
-        title="Add Inflow"
-        description="Record money coming into a wallet"
-      />
-      <InflowForm />
-    </div>
+    <TransactionPage
+      title="Inflow"
+      description="Track and record money coming into your wallets"
+      defaultType="inflow"
+      addButtonLabel="Add Inflow"
+      FormDialog={InflowDialog}
+      stats={[
+        {
+          id: 'stat-total-inflow',
+          label: 'Total Inflow',
+          icon: TrendingUp,
+          colorClass: 'text-emerald-600 dark:text-emerald-400',
+          format: 'currency',
+          getValue: (ctx) => ctx.dashboardTotal ?? 0,
+        },
+        {
+          id: 'stat-inflow-count',
+          label: 'Transactions',
+          icon: Hash,
+          format: 'number',
+          getValue: (ctx) => ctx.ledgerTotal,
+        },
+        {
+          id: 'stat-inflow-page-sum',
+          label: 'Page Total',
+          icon: ArrowDownLeft,
+          colorClass: 'text-emerald-600 dark:text-emerald-400',
+          format: 'currency',
+          getValue: (ctx) => ctx.pageSum,
+        },
+      ]}
+    />
   );
 }

@@ -1,6 +1,7 @@
 import { Geist_Mono, Instrument_Sans, Noto_Serif } from "next/font/google"
 import "@workspace/ui/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { TooltipProvider } from "@workspace/ui/components/tooltip"
 import { Toaster } from "sonner"
 import { cn } from "@workspace/ui/lib/utils"
 import type { Metadata } from "next"
@@ -31,8 +32,10 @@ export default function RootLayout({
     >
       <body>
         <ThemeProvider>
-          {children}
-          <Toaster richColors position="top-right" />
+          <TooltipProvider>
+            {children}
+            <Toaster richColors position="top-right" />
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>
